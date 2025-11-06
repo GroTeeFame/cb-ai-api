@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+import json
+from typing import Any, Dict, Iterable, List, NamedTuple
+
+from app.schemas.state import ConversationState
+
+from .balance import BALANCE_TOOLS, lookup_client_balances, lookup_total_balance
+
+
+class ToolExecutionResult(NamedTuple):
+    reply_text: str
+    context_updates: Dict[str, Any]
+
+
+class UnknownToolError(Exception):
+    """Raised when an LLM requests an unknown tool."""
+
+
+TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
+    "lookup_client_balances": {
+        "schema": BALANCE_TOOLS[0],
+        "executor": lookup_client_balances,
+    },
+    "lookup_total_balance": {
+        "schema": BALANCE_TOOLS[1],
+        "executor": lookup_total_balance,
+    },
+}
+
+
+def tool_schemas() -> List[Dict[str, Any]]:
+    """Return the list of tool specifications exposed to the LLM."""
+    return [entry["schema"] for entry in TOOL_REGISTRY.values()]
+
+
+def execute_tool(
+    *,
+    name: str,
+    arguments: str,
+    state: ConversationState,
+    language: str,
+) -> ToolExecutionResult:
+    """
+    Execute a tool requested by the LLM.
+
+    Parameters
+    ----------
+    name:
+        Tool identifier supplied by the LLM.
+    arguments:
+        JSON string containing tool parameters.
+    state:
+        Current conversation state snapshot.
+    language:
+        Preferred reply language.
+    """
+    entry = TOOL_REGISTRY.get(name)
+    if entry is None:
+        raise UnknownToolError(f"Tool '{name}' is not registered.")
+
+    try:
+        parsed_args = json.loads(arguments) if arguments else {}
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid arguments for tool '{name}': {arguments}") from exc
+
+    executor = entry["executor"]
+    reply_text, updates = executor(
+        client_id=parsed_args.get("client_id"),
+        state=state,
+        language=language,
+    )
+    return ToolExecutionResult(reply_text=reply_text, context_updates=updates or {})
+
+
+def merge_context_updates(
+    updates_list: Iterable[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Flatten multiple context update dictionaries into a single payload."""
+    merged: Dict[str, Any] = {}
+    for updates in updates_list:
+        if not updates:
+            continue
+        for key, value in updates.items():
+            if key == "slots" and isinstance(value, dict):
+                merged.setdefault("slots", {})
+                merged["slots"].update(value)
+            elif key == "metadata" and isinstance(value, dict):
+                merged.setdefault("metadata", {})
+                merged["metadata"].update(value)
+            else:
+                merged[key] = value
+    return merged
