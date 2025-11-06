@@ -1,14 +1,20 @@
-from functools import lru_cache
+from typing import Optional
 
 from app.clients.azure_openai import AzureOpenAIClient
 from app.services.orchestrator import LLMOrchestrator
 from app.services.state import ConversationStateStore
 
 
-@lru_cache()
-def get_state_store() -> ConversationStateStore:
+_state_store: Optional[ConversationStateStore] = None
+_orchestrator: Optional[LLMOrchestrator] = None
+
+
+async def get_state_store() -> ConversationStateStore:
     """Provide a shared conversation state store instance."""
-    return ConversationStateStore()
+    global _state_store
+    if _state_store is None:
+        _state_store = ConversationStateStore()
+    return _state_store
 
 
 def build_llm_client() -> AzureOpenAIClient:
@@ -16,10 +22,12 @@ def build_llm_client() -> AzureOpenAIClient:
     return AzureOpenAIClient()
 
 
-@lru_cache()
-def get_orchestrator() -> LLMOrchestrator:
+async def get_orchestrator() -> LLMOrchestrator:
     """Provide a shared orchestrator wired with dependencies."""
-    return LLMOrchestrator(
-        llm_client_factory=build_llm_client,
-        state_store=get_state_store(),
-    )
+    global _orchestrator
+    if _orchestrator is None:
+        _orchestrator = LLMOrchestrator(
+            llm_client_factory=build_llm_client,
+            state_store=await get_state_store(),
+        )
+    return _orchestrator
