@@ -13,6 +13,7 @@ from app.tools import (
     tool_schemas,
     UnknownToolError,
 )
+from app.tools.types import ToolExecutionResult
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,10 @@ class LLMOrchestrator:
 
     async def handle_turn(self, payload: ChatbotMessage) -> AgentReply:
         """Main entry point for a chatbot message."""
+        logger.info(
+            "processing chatbot turn",
+            extra={"chat_id": payload.chat_id, "message_id": payload.message_id},
+        )
         state = await self._state_store.load(payload)
 
         try:
@@ -50,8 +55,16 @@ class LLMOrchestrator:
             logger.exception("LLM orchestration failed for chat_id=%s", payload.chat_id)
             agent_reply = self._fallback_reply(state, error=exc)
 
-        state.apply_updates(agent_reply.context_updates)
+        if agent_reply.context_updates:
+            state.apply_updates(agent_reply.context_updates)
         await self._state_store.persist(state)
+        logger.info(
+            "turn processed",
+            extra={
+                "chat_id": payload.chat_id,
+                "event": agent_reply.event,
+            },
+        )
         return agent_reply
 
     async def answer_direct(
@@ -61,6 +74,10 @@ class LLMOrchestrator:
         Lightweight entry point for direct question→answer flows without chatbot context.
         """
         language_code = language or self._default_language
+        logger.info(
+            "processing direct question",
+            extra={"language": language_code},
+        )
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -77,15 +94,27 @@ class LLMOrchestrator:
             reply_text = self._extract_text(getattr(choice, "message", None) or {})
             if not reply_text:
                 raise ValueError("Azure OpenAI returned an empty response.")
-            return {"answer": reply_text, "language": language_code}
+            logger.info(
+                "direct answer generated",
+                extra={"language": language_code},
+            )
+            return {
+                "event": "send",
+                "data": reply_text
+            }
+            # return {"answer": reply_text, "language": language_code}
         except Exception as exc:  # pragma: no cover - defensive fallback
             logger.exception("Direct answer LLM call failed.")
             fallback_state = ConversationState(chat_id="direct", language=language_code)
             fallback_reply = self._fallback_reply(fallback_state, error=exc)
             return {
-                "answer": fallback_reply.reply_text or "",
-                "language": fallback_reply.reply_language or language_code,
+                "event": fallback_reply.event,
+                "data": fallback_reply.data,
             }
+            # return {
+            #     "answer": fallback_reply.reply_text or "",
+            #     "language": fallback_reply.reply_language or language_code,
+            # }
 
     async def _invoke_llm(
         self, payload: ChatbotMessage, state: ConversationState
@@ -137,10 +166,15 @@ class LLMOrchestrator:
             return self._fallback_reply(state)
 
         return AgentReply(
-            reply_text=reply_text,
-            reply_language=state.language or self._default_language,
+            event="send",
+            data=reply_text or "",
             context_updates={},
         )
+        # return AgentReply(
+        #     reply_text=reply_text,
+        #     reply_language=state.language or self._default_language,
+        #     context_updates={},
+        # )
 
     def _fallback_reply(
         self, state: ConversationState, error: Optional[Exception] = None
@@ -161,18 +195,22 @@ class LLMOrchestrator:
         if error:
             logger.debug("Fallback reason: %s", error)
             updates = {"metadata": {"last_error": type(error).__name__}}
-
         return AgentReply(
-            reply_text=text,
-            reply_language=language,
+            event="send",
+            data=text,
             context_updates=updates,
         )
+        # return AgentReply(
+        #     reply_text=text,
+        #     reply_language=language,
+        #     context_updates=updates,
+        # )
 
     def _handle_tool_calls(
         self, tool_calls: Any, state: ConversationState
     ) -> AgentReply:
         language = state.language or self._default_language
-        reply_chunks: List[str] = []
+        tool_results: List[ToolExecutionResult] = []
         updates_to_merge: List[Dict[str, Any]] = []
 
         for call in tool_calls:
@@ -185,6 +223,10 @@ class LLMOrchestrator:
                 continue
 
             try:
+                logger.info(
+                    "executing tool",
+                    extra={"tool_name": name, "chat_id": state.chat_id},
+                )
                 result = execute_tool(
                     name=name,
                     arguments=arguments,
@@ -199,27 +241,50 @@ class LLMOrchestrator:
                     else "Запитаний інструмент зараз недоступний."
                 )
                 return AgentReply(
-                    reply_text=text,
-                    reply_language=language,
+                    event="send",
+                    data=text,
                     context_updates={},
                 )
+                # return AgentReply(
+                #     reply_text=text,
+                #     reply_language=language,
+                #     context_updates={},
+                # )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.exception("Tool '%s' execution failed.", name)
                 return self._fallback_reply(state, error=exc)
 
-            reply_chunks.append(result.reply_text)
+            tool_results.append(result)
             updates_to_merge.append(result.context_updates)
             if result.context_updates:
                 state.apply_updates(result.context_updates)
 
-        reply_text = "\n\n".join(chunk for chunk in reply_chunks if chunk)
-        context_updates = merge_context_updates(updates_to_merge)
+        if not tool_results:
+            return self._fallback_reply(state)
 
+        context_updates = merge_context_updates(updates_to_merge)
+        function_result = next(
+            (res for res in tool_results if res.event != "send"),
+            None,
+        )
+        if function_result:
+            return AgentReply(
+                event=function_result.event,
+                data=function_result.data,
+                context_updates=context_updates,
+            )
+
+        reply_text = "\n\n".join(res.data for res in tool_results if res.data)
         return AgentReply(
-            reply_text=reply_text or None,
-            reply_language=language,
+            event="send",
+            data=reply_text or "",
             context_updates=context_updates,
         )
+        # return AgentReply(
+        #     reply_text=reply_text or None,
+        #     reply_language=language,
+        #     context_updates=context_updates,
+        # )
 
     def _ensure_llm_client(self) -> AzureOpenAIClient:
         if self._llm_client is None:

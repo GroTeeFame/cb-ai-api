@@ -1,23 +1,28 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Iterable, List, NamedTuple
+import logging
+from typing import Any, Dict, Iterable, List
 
 from app.schemas.state import ConversationState
 
 from .balance import BALANCE_TOOLS, lookup_client_balances, lookup_total_balance
-
-
-class ToolExecutionResult(NamedTuple):
-    reply_text: str
-    context_updates: Dict[str, Any]
+from .currency import CURRENCY_TOOLS, get_exchange
+from .types import ToolExecutionResult
 
 
 class UnknownToolError(Exception):
     """Raised when an LLM requests an unknown tool."""
 
 
+logger = logging.getLogger(__name__)
+
+
 TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
+    "get_exchange": {
+        "schema": CURRENCY_TOOLS[0],
+        "executor": get_exchange,
+    },
     "lookup_client_balances": {
         "schema": BALANCE_TOOLS[0],
         "executor": lookup_client_balances,
@@ -65,12 +70,30 @@ def execute_tool(
         raise ValueError(f"Invalid arguments for tool '{name}': {arguments}") from exc
 
     executor = entry["executor"]
-    reply_text, updates = executor(
+    logger.info("tool invocation", extra={"tool_name": name})
+    result = executor(
         client_id=parsed_args.get("client_id"),
         state=state,
         language=language,
     )
-    return ToolExecutionResult(reply_text=reply_text, context_updates=updates or {})
+    if isinstance(result, ToolExecutionResult):
+        event = result.event or "send"
+        data = result.data or ""
+        updates = result.context_updates or {}
+        return ToolExecutionResult(event=event, data=data, context_updates=updates)
+
+    # Backward compatibility: allow old-style tuple responses.
+    if isinstance(result, tuple) and len(result) == 2:
+        reply_text, updates = result
+        return ToolExecutionResult(
+            event="send",
+            data=reply_text or "",
+            context_updates=updates or {},
+        )
+
+    raise TypeError(
+        f"Tool '{name}' returned unsupported result type: {type(result)!r}"
+    )
 
 
 def merge_context_updates(
