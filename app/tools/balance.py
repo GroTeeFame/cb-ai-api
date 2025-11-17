@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 import requests
+import logging
 
 from app.schemas.state import ConversationState
 from app.tools.types import ToolExecutionResult
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,8 @@ def lookup_client_balances(
     return ToolExecutionResult(
         event="send",
         data=structured_reply,
-        context_updates={"slots": {"client_id": resolved_id}},
+        # context_updates={"slots": {"client_id": resolved_id}},
+        context_updates={},
         post_process=True,
     )
 
