@@ -42,15 +42,11 @@ class LLMOrchestrator:
 
     async def handle_turn(self, payload: ChatbotMessage) -> AgentReply:
         """Main entry point for a chatbot message."""
-        logger.info(
-            "processing chatbot turn",
-            extra={"chat_id": payload.chat_id, "message_id": payload.message_id},
-        )
         state = await self._state_store.load(payload)
 
         try:
             completion = await self._invoke_llm(payload, state)
-            agent_reply = self._build_agent_reply(completion, state)
+            agent_reply = await self._build_agent_reply(payload, completion, state)
         except Exception as exc:  # pragma: no cover - defensive fallback
             logger.exception("LLM orchestration failed for chat_id=%s", payload.chat_id)
             agent_reply = self._fallback_reply(state, error=exc)
@@ -58,13 +54,6 @@ class LLMOrchestrator:
         if agent_reply.context_updates:
             state.apply_updates(agent_reply.context_updates)
         await self._state_store.persist(state)
-        logger.info(
-            "turn processed",
-            extra={
-                "chat_id": payload.chat_id,
-                "event": agent_reply.event,
-            },
-        )
         return agent_reply
 
     async def answer_direct(
@@ -74,10 +63,6 @@ class LLMOrchestrator:
         Lightweight entry point for direct question→answer flows without chatbot context.
         """
         language_code = language or self._default_language
-        logger.info(
-            "processing direct question",
-            extra={"language": language_code},
-        )
         messages: List[Dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -94,10 +79,6 @@ class LLMOrchestrator:
             reply_text = self._extract_text(getattr(choice, "message", None) or {})
             if not reply_text:
                 raise ValueError("Azure OpenAI returned an empty response.")
-            logger.info(
-                "direct answer generated",
-                extra={"language": language_code},
-            )
             return {
                 "event": "send",
                 "data": reply_text
@@ -151,7 +132,9 @@ class LLMOrchestrator:
     def _available_tools(self, state: ConversationState) -> Optional[List[Dict[str, Any]]]:
         return tool_schemas()
 
-    def _build_agent_reply(self, completion: Any, state: ConversationState) -> AgentReply:
+    async def _build_agent_reply(
+        self, payload: ChatbotMessage, completion: Any, state: ConversationState
+    ) -> AgentReply:
         choice = self._safe_get_choice(completion)
         if not choice:
             return self._fallback_reply(state)
@@ -159,7 +142,7 @@ class LLMOrchestrator:
         message = getattr(choice, "message", None) or {}
         tool_calls = getattr(message, "tool_calls", None)
         if tool_calls:
-            return self._handle_tool_calls(tool_calls, state)
+            return await self._handle_tool_calls(payload, tool_calls, state)
 
         reply_text = self._extract_text(message)
         if not reply_text:
@@ -206,11 +189,12 @@ class LLMOrchestrator:
         #     context_updates=updates,
         # )
 
-    def _handle_tool_calls(
-        self, tool_calls: Any, state: ConversationState
+    async def _handle_tool_calls(
+        self, payload: ChatbotMessage, tool_calls: Any, state: ConversationState
     ) -> AgentReply:
         language = state.language or self._default_language
         tool_results: List[ToolExecutionResult] = []
+        tool_call_records: List[Any] = []
         updates_to_merge: List[Dict[str, Any]] = []
 
         for call in tool_calls:
@@ -223,10 +207,6 @@ class LLMOrchestrator:
                 continue
 
             try:
-                logger.info(
-                    "executing tool",
-                    extra={"tool_name": name, "chat_id": state.chat_id},
-                )
                 result = execute_tool(
                     name=name,
                     arguments=arguments,
@@ -255,6 +235,7 @@ class LLMOrchestrator:
                 return self._fallback_reply(state, error=exc)
 
             tool_results.append(result)
+            tool_call_records.append(call)
             updates_to_merge.append(result.context_updates)
             if result.context_updates:
                 state.apply_updates(result.context_updates)
@@ -271,6 +252,29 @@ class LLMOrchestrator:
             return AgentReply(
                 event=function_result.event,
                 data=function_result.data,
+                context_updates=context_updates,
+            )
+
+        post_process_payloads: List[Dict[str, Any]] = []
+        assistant_tool_calls: List[Dict[str, Any]] = []
+        for idx, (call, result) in enumerate(zip(tool_call_records, tool_results)):
+            if not result.post_process:
+                continue
+            call_id = self._tool_call_identifier(call, idx)
+            assistant_tool_calls.append(self._build_assistant_tool_call(call, call_id))
+            post_process_payloads.append(
+                {
+                    "tool_call_id": call_id,
+                    "content": result.data or "",
+                } 
+            )
+
+        if post_process_payloads:
+            return await self._complete_with_tool_outputs(
+                payload=payload,
+                state=state,
+                assistant_calls=assistant_tool_calls,
+                tool_outputs=post_process_payloads,
                 context_updates=context_updates,
             )
 
@@ -292,6 +296,90 @@ class LLMOrchestrator:
                 raise RuntimeError("No Azure OpenAI client factory configured.")
             self._llm_client = self._llm_client_factory()
         return self._llm_client
+
+    async def _complete_with_tool_outputs(
+        self,
+        *,
+        payload: ChatbotMessage,
+        state: ConversationState,
+        assistant_calls: List[Dict[str, Any]],
+        tool_outputs: List[Dict[str, Any]],
+        context_updates: Dict[str, Any],
+    ) -> AgentReply:
+        messages = self._build_messages(payload, state)
+        messages.append(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": assistant_calls,
+            }
+        )
+        for output in tool_outputs:
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": output["tool_call_id"],
+                    "content": output["content"],
+                }
+            )
+
+        try:
+            completion = await self._ensure_llm_client().generate(messages=messages)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("Post-tool LLM completion failed.")
+            return self._fallback_reply(state, error=exc)
+
+        choice = self._safe_get_choice(completion)
+        if not choice:
+            return self._fallback_reply(state)
+
+        reply_text = self._extract_text(getattr(choice, "message", None) or {})
+        if not reply_text:
+            return self._fallback_reply(state)
+
+        return AgentReply(
+            event="send",
+            data=reply_text,
+            context_updates=context_updates,
+        )
+
+    @staticmethod
+    def _tool_call_identifier(call: Any, idx: int) -> str:
+        if hasattr(call, "id") and getattr(call, "id"):
+            return getattr(call, "id")
+        if isinstance(call, dict) and call.get("id"):
+            return call["id"]
+        return f"tool_call_{idx}"
+
+    @staticmethod
+    def _build_assistant_tool_call(call: Any, call_id: str) -> Dict[str, Any]:
+        function = getattr(call, "function", None)
+        if isinstance(call, dict):
+            function = call.get("function", function)
+
+        if isinstance(function, dict):
+            name = function.get("name", "")
+            arguments = function.get("arguments", "")
+        else:
+            name = getattr(function, "name", "") if function else ""
+            arguments = getattr(function, "arguments", "") if function else ""
+
+        if arguments is None:
+            arguments = ""
+        if not isinstance(arguments, str):
+            try:
+                arguments = json.dumps(arguments, ensure_ascii=False)
+            except TypeError:
+                arguments = str(arguments)
+
+        return {
+            "id": call_id,
+            "type": "function",
+            "function": {
+                "name": name,
+                "arguments": arguments or "{}",
+            },
+        }
 
     @staticmethod
     def _safe_get_choice(completion: Any) -> Optional[Any]:

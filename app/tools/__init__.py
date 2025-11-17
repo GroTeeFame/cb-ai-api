@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any, Dict, Iterable, List
 
 from app.schemas.state import ConversationState
@@ -13,9 +12,6 @@ from .types import ToolExecutionResult
 
 class UnknownToolError(Exception):
     """Raised when an LLM requests an unknown tool."""
-
-
-logger = logging.getLogger(__name__)
 
 
 TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
@@ -70,7 +66,6 @@ def execute_tool(
         raise ValueError(f"Invalid arguments for tool '{name}': {arguments}") from exc
 
     executor = entry["executor"]
-    logger.info("tool invocation", extra={"tool_name": name})
     result = executor(
         client_id=parsed_args.get("client_id"),
         state=state,
@@ -78,17 +73,29 @@ def execute_tool(
     )
     if isinstance(result, ToolExecutionResult):
         event = result.event or "send"
-        data = result.data or ""
+        if result.post_process and not isinstance(result.data, str):
+            try:
+                data = json.dumps(result.data, ensure_ascii=False)
+            except TypeError:
+                data = str(result.data)
+        else:
+            data = "" if result.data is None else str(result.data)
         updates = result.context_updates or {}
-        return ToolExecutionResult(event=event, data=data, context_updates=updates)
+        return ToolExecutionResult(
+            event=event,
+            data=data,
+            context_updates=updates,
+            post_process=result.post_process,
+        )
 
     # Backward compatibility: allow old-style tuple responses.
     if isinstance(result, tuple) and len(result) == 2:
         reply_text, updates = result
         return ToolExecutionResult(
             event="send",
-            data=reply_text or "",
+            data=str(reply_text or ""),
             context_updates=updates or {},
+            post_process=False,
         )
 
     raise TypeError(

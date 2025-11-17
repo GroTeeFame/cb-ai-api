@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, Dict, NamedTuple
+from dataclasses import dataclass, field
+from typing import Any, Dict
 
 
-class ToolExecutionResult(NamedTuple):
+@dataclass
+class ToolExecutionResult:
     """Normalized result produced by domain tools."""
 
-    event: str
-    data: str
-    context_updates: Dict[str, Any]
+    event: str = "send"
+    data: str = ""
+    context_updates: Dict[str, Any] = field(default_factory=dict)
+    post_process: bool = False

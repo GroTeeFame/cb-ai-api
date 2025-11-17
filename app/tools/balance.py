@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+
+import requests
 
 from app.schemas.state import ConversationState
 from app.tools.types import ToolExecutionResult
@@ -9,23 +11,84 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+CLIENT_SERVICE_BASE_URL = "http://127.0.0.1:8001"
+
+
+# def _resolve_client_id(
+#     provided_id: Optional[int],
+#     state: Optional[ConversationState],
+# ) -> Optional[int]:
+#     if provided_id is not None:
+#         return int(provided_id)
+#     if state:
+#         stored = state.slots.get("client_id")
+#         if stored is not None:
+#             try:
+#                 return int(stored)
+#             except (TypeError, ValueError):
+#                 return None
+#     return None
+
+
+def _language_bundle(language: Optional[str]) -> Dict[str, str]:
+    if language and language.lower().startswith("en"):
+        return {
+            "missing_id": "I need the client ID to look up balances.",
+            "no_accounts": "I couldn't find any accounts for this client.",
+            "error": "I cannot retrieve balance information right now.",
+        }
+    return {
+        "missing_id": "Щоб переглянути баланси, потрібен ідентифікатор клієнта.",
+        "no_accounts": "Для цього клієнта не знайдено рахунків.",
+        "error": "Наразі не можу отримати дані про баланси.",
+    }
+
+
 def lookup_client_balances(
     *,
     client_id: Optional[int],
     state: Optional[ConversationState],
     language: Optional[str],
 ) -> ToolExecutionResult:
-    """
-    Indicate that the chatbot backend should present account balances.
+    """Fetch per-account balances via the demo banking API."""
+    strings = _language_bundle(language)
+    # resolved_id = _resolve_client_id(client_id, state)
+    # if resolved_id is None:
+    #     return ToolExecutionResult(event="send", data=strings["missing_id"])
+    resolved_id = 5
+    try:
+        response = requests.get(
+            f"{CLIENT_SERVICE_BASE_URL}/client_balances",
+            params={"client_id": resolved_id},
+            headers={"Content-Type": "application/json"},
+            timeout=5,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        logger.warning("Balance lookup failed for client %s: %s", resolved_id, exc)
+        return ToolExecutionResult(event="send", data=strings["error"])
 
-    The legacy system already holds every parameter (client id, auth state, etc.),
-    so the AI agent simply declares the intent.
-    """
+    accounts: List[Dict[str, Any]] = payload.get("accounts") if isinstance(payload, dict) else []
+    if not accounts:
+        return ToolExecutionResult(
+            event="send",
+            data=strings["no_accounts"],
+            context_updates={"slots": {"client_id": resolved_id}},
+        )
+
+    structured_reply = {
+        "type": "accounts",
+        "client_id": resolved_id,
+        "accounts": accounts,
+    }
     return ToolExecutionResult(
-        event="function",
-        data="get_balances",
-        context_updates={},
+        event="send",
+        data=structured_reply,
+        context_updates={"slots": {"client_id": resolved_id}},
+        post_process=True,
     )
+
 
 
 def lookup_total_balance(
@@ -34,41 +97,48 @@ def lookup_total_balance(
     state: Optional[ConversationState],
     language: Optional[str],
 ) -> ToolExecutionResult:
-    """
-    Indicate that the chatbot backend should compute the total balance.
-    """
-    #TODO: Its working schema. Tools will be used in this way. But i need to make clear to agent when and what tool to use
-    #TODO: Now i need to add one more tool to call BURA api, to get exchange rate, in case if user want to know exact currency.
-    #TODO: Or i need to make call to BURA api every time when user want to know exchange rate, but when user want exact currency agent give him only those currency.
+    """Fetch aggregate balance for a client via the demo banking API."""
+    strings = _language_bundle(language)
+    # resolved_id = _resolve_client_id(client_id, state)
+    # if resolved_id is None:
+    #     return ToolExecutionResult(event="send", data=strings["missing_id"])
+    resolved_id = 5
+    try:
+        response = requests.get(
+            f"{CLIENT_SERVICE_BASE_URL}/client_total_balance",
+            params={"client_id": resolved_id},
+            headers={"Content-Type": "application/json"},
+            timeout=5,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        logger.warning("Total balance lookup failed for client %s: %s", resolved_id, exc)
+        return ToolExecutionResult(event="send", data=strings["error"])
 
-    # import requests
-    # try:
-    #     response = requests.get(
-    #         f"http://127.0.0.1:8001/client_total_balance",
-    #         params={"client_id": 5},
-    #         headers={"Content-Type": "application/json"},
-    #         timeout=5,
-    #     )
-    #     if response.status_code == 200:
-    #         payload = response.json()
-    #         if isinstance(payload, dict):
-    #             total = payload.get("total_balance")
-    #         else:
-    #             total = payload
-    #     else:
-    #         response.raise_for_status()
-    # except requests.RequestException:
-    #     total = None
-    # logger.info(
-    #     f"TOOL USAGE lookup_total_balance calling to api with next result: {total}",
-    #     extra={},
-    # )
+    total_value: Optional[float]
+    if isinstance(payload, dict):
+        total_value = payload.get("total_balance")
+    else:
+        total_value = payload
 
+    if total_value is None:
+        return ToolExecutionResult(event="send", data=strings["error"])
 
+    structured_reply = {
+        "type": "total_balance",
+        "client_id": resolved_id,
+        "total": total_value,
+    }
+    logger.info(
+        "TOOL USAGE lookup_total_balance calling to api with next result: %s",
+        total_value,
+    )
     return ToolExecutionResult(
-        event="function",
-        data="get_total_balance",
-        context_updates={},
+        event="send",
+        data=structured_reply,
+        context_updates={"slots": {"client_id": resolved_id}},
+        post_process=True,
     )
 
 
