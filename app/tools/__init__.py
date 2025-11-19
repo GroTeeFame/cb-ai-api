@@ -5,7 +5,8 @@ from typing import Any, Dict, Iterable, List
 
 from app.schemas.state import ConversationState
 
-from .balance import BALANCE_TOOLS, lookup_client_balances, lookup_total_balance
+# from .balance import BALANCE_TOOLS, lookup_client_balances, lookup_total_balance
+from .balance import BALANCE_TOOLS, get_balance
 from .currency import CURRENCY_TOOLS, get_exchange, get_specific_exchange
 from .types import ToolExecutionResult
 
@@ -23,14 +24,18 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "schema": CURRENCY_TOOLS[1],
         "executor": get_specific_exchange
     },
-    "lookup_client_balances": {
+    "get_balance": {
         "schema": BALANCE_TOOLS[0],
-        "executor": lookup_client_balances,
-    },
-    "lookup_total_balance": {
-        "schema": BALANCE_TOOLS[1],
-        "executor": lookup_total_balance,
-    },
+        "executor": get_balance,
+    }
+    # "lookup_client_balances": {
+    #     "schema": BALANCE_TOOLS[0],
+    #     "executor": lookup_client_balances,
+    # },
+    # "lookup_total_balance": {
+    #     "schema": BALANCE_TOOLS[1],
+    #     "executor": lookup_total_balance,
+    # },
 }
 
 

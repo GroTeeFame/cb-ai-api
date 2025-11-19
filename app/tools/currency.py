@@ -42,7 +42,7 @@ def get_exchange(
         event="function",
         data="get_exchange",
         context_updates={},
-
+        post_process=False,
     )
 
 def get_specific_exchange(
