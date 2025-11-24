@@ -43,6 +43,8 @@ def _language_bundle(language: Optional[str]) -> Dict[str, str]:
         "missing_id": "Щоб переглянути баланси, потрібен ідентифікатор клієнта.",
         "no_accounts": "Для цього клієнта не знайдено рахунків.",
         "error": "Наразі не можу отримати дані про баланси.",
+        "not_found": "Рахунок {account} не знайдено.",
+        "balance_template": "Баланс на рахунку {account}: {amount} {currency}",
     }
 
 
@@ -67,6 +69,7 @@ def get_balance(
 def get_specific_balance(
     *,
     client_id: Optional[int],
+    account: Optional[str] = None,
     mode: Optional[int] = None,
     state: Optional[ConversationState],
     language: Optional[str],
@@ -74,6 +77,7 @@ def get_specific_balance(
     """
     Get list with all accounts and its balances, to give answer to user with LLM.
     """
+    strings = _language_bundle(language)
     if client_id is None:
         logger.warning("get_specific_balance() missing client_id")
         return ToolExecutionResult(
@@ -83,10 +87,11 @@ def get_specific_balance(
             post_process=False,
         )
 
+    account_normalized = account.replace(" ", "") if account else None
     mode_value = 0 if mode is None else mode
     logger.info(
         "get_specific_balance() request",
-        extra={"client_id": client_id, "mode": mode_value},
+        extra={"client_id": client_id, "mode": mode_value, "account": account_normalized},
     )
 
     try:
@@ -127,6 +132,37 @@ def get_specific_balance(
             context_updates={},
             post_process=False,
         )
+
+    if account_normalized:
+        # Find the specific account by IBAN/account number.
+        match = None
+        if isinstance(payload, list):
+            for entry in payload:
+                entry_iban = str(entry.get("IBAN", "")).replace(" ", "")
+                if entry_iban == account_normalized:
+                    match = entry
+                    break
+        if match:
+            amount = match.get("amountRest", "")
+            currency = match.get("currencyTag", "")
+            message = strings["balance_template"].format(
+                account=account_normalized,
+                amount=amount,
+                currency=currency,
+            )
+            return ToolExecutionResult(
+                event='send',
+                data=message,
+                context_updates={},
+                post_process=False,
+            )
+        return ToolExecutionResult(
+            event='send',
+            data=strings["not_found"].format(account=account_normalized),
+            context_updates={},
+            post_process=False,
+        )
+
     return ToolExecutionResult(
         event='send',
         data=payload,
@@ -165,6 +201,12 @@ BALANCE_TOOLS: list[Dict[str, Any]] = [
                         "type": "integer",
                         "description": (
                             "Identifier of the client in bank database"
+                        ),
+                    },
+                    "account": {
+                        "type": "string",
+                        "description": (
+                            "Account number or IBAN the user is asking about."
                         ),
                     },
                     "mode": {
