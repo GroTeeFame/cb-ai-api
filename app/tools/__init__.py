@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from typing import Any, Dict, Iterable, List
 
@@ -79,11 +80,17 @@ def execute_tool(
         raise ValueError(f"Invalid arguments for tool '{name}': {arguments}") from exc
 
     executor = entry["executor"]
-    result = executor(
-        client_id=parsed_args.get("client_id"),
-        state=state,
-        language=language,
-    )
+    sig = inspect.signature(executor)
+    kwargs: Dict[str, Any] = {}
+    for name in sig.parameters.keys():
+        if name == "state":
+            kwargs[name] = state
+        elif name == "language":
+            kwargs[name] = language
+        else:
+            kwargs[name] = parsed_args.get(name)
+
+    result = executor(**kwargs)
     if isinstance(result, ToolExecutionResult):
         event = result.event or "send"
         if result.post_process and not isinstance(result.data, str):

@@ -66,38 +66,47 @@ def get_balance(
 
 def get_specific_balance(
     *,
-    client_id: int,
+    client_id: Optional[int],
+    mode: Optional[int] = None,
     state: Optional[ConversationState],
     language: Optional[str],
 ) -> ToolExecutionResult:
     """
     Get list with all accounts and its balances, to give answer to user with LLM.
     """
+    if client_id is None:
+        logger.warning("get_specific_balance() missing client_id")
+        return ToolExecutionResult(
+            event='function',
+            data='get_balance',
+            context_updates={},
+            post_process=False,
+        )
 
-    logger.info(f"get_specific_balance() : client_id={client_id}")
+    mode_value = 0 if mode is None else mode
+    logger.info(
+        "get_specific_balance() request",
+        extra={"client_id": client_id, "mode": mode_value},
+    )
 
     try:
-        body = {
-            "mode": 0,
+        params = {
             "clientid": client_id,
-        },
-        logger.info(f"get_specific_balance() : body={body}")
+            "mode": mode_value,
+        }
+        logger.info("get_specific_balance() params", extra=params)
         response = requests.get(
             f"{BANK_API_BASE_URL}/api/chatbot/accounts",
-            # f"{CLIENT_SERVICE_BASE_URL}/accounts",
-            data=body,
-            proxies={
-                "http": None,
-                "https": None,
-            },
+            params=params,
+            proxies={"http": None, "https": None},
             headers={"Content-Type": "application/json"},
             timeout=20,
         )
-        
-        logger.info(f"get_specific_balance() : response={response}")
+
+        logger.info("get_specific_balance() response", extra={"status": response.status_code})
         response.raise_for_status()
         payload = response.json()
-        logger.info(f"get_specific_balance() : payload={payload}")
+        logger.info("get_specific_balance() payload", extra={"payload": payload})
 
     except requests.RequestException as exc:
         logger.warning("get_specific_exchange() failed: %s", exc)
@@ -152,20 +161,20 @@ BALANCE_TOOLS: list[Dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "mode": {
-                        "type": "integer",
-                        "description": (
-                            "Identifier of kind of search for account/balance search."
-                        )
-                    },
                     "client_id": {
                         "type": "integer",
                         "description": (
                             "Identifier of the client in bank database"
                         ),
+                    },
+                    "mode": {
+                        "type": "integer",
+                        "description": (
+                            "Identifier of kind of search for account/balance search."
+                        )
                     }
                 },
-                "required": [],
+                "required": ["client_id"],
                 "additionalProperties": False,
             },
         },
