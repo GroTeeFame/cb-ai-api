@@ -10,7 +10,9 @@ from app.tools.types import ToolExecutionResult
 
 logger = logging.getLogger(__name__)
 
+BANK_API_BASE_URL = "http://10.129.132.15:8000"
 
+CLIENT_SERVICE_BASE_URL = "http://127.0.0.1:8001"
 # CLIENT_SERVICE_BASE_URL = "http://127.0.0.1:8001"
 
 
@@ -30,18 +32,18 @@ logger = logging.getLogger(__name__)
 #     return None
 
 
-# def _language_bundle(language: Optional[str]) -> Dict[str, str]:
-#     if language and language.lower().startswith("en"):
-#         return {
-#             "missing_id": "I need the client ID to look up balances.",
-#             "no_accounts": "I couldn't find any accounts for this client.",
-#             "error": "I cannot retrieve balance information right now.",
-#         }
-#     return {
-#         "missing_id": "Щоб переглянути баланси, потрібен ідентифікатор клієнта.",
-#         "no_accounts": "Для цього клієнта не знайдено рахунків.",
-#         "error": "Наразі не можу отримати дані про баланси.",
-#     }
+def _language_bundle(language: Optional[str]) -> Dict[str, str]:
+    if language and language.lower().startswith("en"):
+        return {
+            "missing_id": "I need the client ID to look up balances.",
+            "no_accounts": "I couldn't find any accounts for this client.",
+            "error": "I cannot retrieve balance information right now.",
+        }
+    return {
+        "missing_id": "Щоб переглянути баланси, потрібен ідентифікатор клієнта.",
+        "no_accounts": "Для цього клієнта не знайдено рахунків.",
+        "error": "Наразі не можу отримати дані про баланси.",
+    }
 
 
 def get_balance(
@@ -62,6 +64,62 @@ def get_balance(
         post_process=False,
     )
 
+def get_specific_balance(
+    *,
+    client_id: int,
+    state: Optional[ConversationState],
+    language: Optional[str],
+) -> ToolExecutionResult:
+    """
+    Get list with all accounts and its balances, to give answer to user with LLM.
+    """
+
+    logger.info(f"get_specific_balance() : client_id={client_id}")
+
+    try:
+        body = {
+            "mode": 0,
+            "clientid": client_id,
+        },
+        response = requests.get(
+            # f"{BANK_API_BASE_URL}/api/chatbot/accounts",
+            f"{CLIENT_SERVICE_BASE_URL}/accounts",
+            data=body,
+            proxies={
+                "http": None,
+                "https": None,
+            },
+            headers={"Content-Type": "application/json"},
+            timeout=5,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        logger.warning("get_specific_exchange() failed: %s", exc)
+        #TODO: here we can use two solution, we can send error to chatbot -> client.
+        #TODO: or we not send error, instead we send to chatbot command to execute this from its beckend
+        # return ToolExecutionResult(event='send', data=strings["error"])
+        
+        return ToolExecutionResult(
+            event='function',
+            data='get_balance',
+            context_updates={},
+            post_process=False,
+        )
+    if not payload:
+        return ToolExecutionResult(
+            event='function',
+            data='get_balance',
+            context_updates={},
+            post_process=False,
+        )
+    return ToolExecutionResult(
+        event='send',
+        data=payload,
+        context_updates={},
+        post_process=True,
+    )
+
 
 BALANCE_TOOLS: list[Dict[str, Any]] = [
     {
@@ -74,6 +132,34 @@ BALANCE_TOOLS: list[Dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_specific_balance",
+            "description": (
+                "Request the list with all user accounts and balances to give user answers about specific account and balance. with LLM processing."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "integer",
+                        "description": (
+                            "Identifier of kind of search for account/balance search."
+                        )
+                    },
+                    "client_id": {
+                        "type": "integer",
+                        "description": (
+                            "Identifier of the client in bank database"
+                        ),
+                    }
+                },
                 "required": [],
                 "additionalProperties": False,
             },
