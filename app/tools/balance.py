@@ -177,7 +177,7 @@ BALANCE_TOOLS: list[Dict[str, Any]] = [
         "function": {
             "name": "get_balance",
             "description": (
-                "Request the legacy chatbot backend to find and send current account balance to client."
+                "Request the legacy chatbot backend to find and send current account balance to client. If user ask about balances, or want to get all balances, use this tool."
             ),
             "parameters": {
                 "type": "object",
@@ -192,7 +192,7 @@ BALANCE_TOOLS: list[Dict[str, Any]] = [
         "function": {
             "name": "get_specific_balance",
             "description": (
-                "Request the list with all user accounts and balances to give user answers about specific account and balance. with LLM processing."
+                "Request the list with all user accounts and balances to give user answers about specific account and balance. with LLM processing. Use this tool if user ask you about specific balance, or mentioned IBAN."
             ),
             "parameters": {
                 "type": "object",
