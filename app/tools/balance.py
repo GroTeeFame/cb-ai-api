@@ -93,8 +93,12 @@ def get_specific_balance(
             headers={"Content-Type": "application/json"},
             timeout=20,
         )
+        
+        logger.info(f"get_specific_balance() : response={response}")
         response.raise_for_status()
         payload = response.json()
+        logger.info(f"get_specific_balance() : payload={payload}")
+
     except requests.RequestException as exc:
         logger.warning("get_specific_exchange() failed: %s", exc)
         #TODO: here we can use two solution, we can send error to chatbot -> client.
