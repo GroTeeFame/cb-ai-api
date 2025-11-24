@@ -192,7 +192,7 @@ BALANCE_TOOLS: list[Dict[str, Any]] = [
         "function": {
             "name": "get_specific_balance",
             "description": (
-                "Request the list with all user accounts and balances to give user answers about specific account and balance. with LLM processing. Use this tool if user ask you about specific balance, or mentioned IBAN."
+                "Request the list with all user accounts and balances to give user answers about specific account and balance. with LLM processing. Use this tool if user ask you about specific balance or specific currency of balance, or mentioned IBAN."
             ),
             "parameters": {
                 "type": "object",
