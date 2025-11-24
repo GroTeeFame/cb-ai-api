@@ -91,7 +91,7 @@ def get_specific_balance(
                 "https": None,
             },
             headers={"Content-Type": "application/json"},
-            timeout=5,
+            timeout=20,
         )
         response.raise_for_status()
         payload = response.json()
