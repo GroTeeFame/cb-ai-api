@@ -74,7 +74,7 @@ def get_specific_balance(
     Get list with all accounts and its balances, to give answer to user with LLM.
     """
 
-    logger.info(f"get_specific_balance() : client_id={client_id}")
+    # logger.info(f"get_specific_balance() : client_id={client_id}")
 
     try:
         body = {
@@ -82,8 +82,8 @@ def get_specific_balance(
             "clientid": client_id,
         },
         response = requests.get(
-            # f"{BANK_API_BASE_URL}/api/chatbot/accounts",
-            f"{CLIENT_SERVICE_BASE_URL}/accounts",
+            f"{BANK_API_BASE_URL}/api/chatbot/accounts",
+            # f"{CLIENT_SERVICE_BASE_URL}/accounts",
             data=body,
             proxies={
                 "http": None,
