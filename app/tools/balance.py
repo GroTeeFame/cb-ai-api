@@ -77,6 +77,7 @@ def get_specific_balance(
     """
     Get list with all accounts and its balances, to give answer to user with LLM.
     """
+    #TODO: Right now we search for IBAN with code, NOT by model reasoning. It works, but it will fail if user write IBAN with errors. We can give model opportunity to find needed IBAN by herself, for this we need to delete code part in this function for search of IBAN, and send full list of IBAN back to LLM for reasoning.
     strings = _language_bundle(language)
     if client_id is None:
         logger.warning("get_specific_balance() missing client_id")

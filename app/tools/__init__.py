@@ -9,6 +9,7 @@ from app.schemas.state import ConversationState
 # from .balance import BALANCE_TOOLS, lookup_client_balances, lookup_total_balance
 from .balance import BALANCE_TOOLS, get_balance, get_specific_balance
 from .currency import CURRENCY_TOOLS, get_exchange, get_specific_exchange
+from .info import INFO_TOOLS, get_bank_info
 from .types import ToolExecutionResult
 
 
@@ -33,6 +34,10 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "schema": BALANCE_TOOLS[1],
         "executor": get_specific_balance
     },
+    "get_bank_info": {
+        "schema": INFO_TOOLS[0],
+        "executor": get_bank_info
+    }
     # "lookup_client_balances": {
     #     "schema": BALANCE_TOOLS[0],
     #     "executor": lookup_client_balances,
