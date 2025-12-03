@@ -62,6 +62,7 @@ def get_balance(
 
     The legacy system already holds every parameter, so the AI agent simply declares the intent.
     """
+    logger.info("get_balance() tool usage")
     return ToolExecutionResult(
         event="function",
         data="get_balance",
@@ -84,6 +85,7 @@ def get_specific_balance(
 
     The legacy system already holds every parameter, so the AI agent simply declares the intent.
     """
+    logger.info("get_specific_balance() tool usage")
     resolved_id = _resolve_client_id(client_id, state)
     if resolved_id is None:
         logger.warning("get_specific_balance() missing client_id/customerid")
@@ -98,6 +100,7 @@ def get_specific_balance(
         f"get_balance(customerid={resolved_id},mode={mode_value},"
         f"treatyid={treatyid},IBAN={iban_value},currencyTag={currency_value})"
     )
+    logger.info(f"get_specific_balance() tool return: {line_to_return}")
     return ToolExecutionResult(
         event="function",
         data=line_to_return,
