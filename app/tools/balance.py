@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Union
+import json
 
 import logging
 
@@ -54,29 +55,22 @@ def _language_bundle(language: Optional[str]) -> Dict[str, str]:
 def _normalize_multi_value(
     value: Optional[Union[str, List[str]]],
     *,
-    separator: str = ",",
     upper: bool = False,
-) -> str:
-    """Normalize single or multiple string values into a single string."""
+) -> List[str]:
+    """Normalize single or multiple string values into a list."""
     if value is None:
-        return ""
-    if isinstance(value, list):
-        parts = []
-        for item in value:
-            if not isinstance(item, str):
-                continue
-            normalized = item.replace(" ", "")
-            if upper:
-                normalized = normalized.upper()
-            if normalized:
-                parts.append(normalized)
-        return separator.join(parts)
-    if isinstance(value, str):
-        normalized = value.replace(" ", "")
+        return []
+    values: List[str] = []
+    items = value if isinstance(value, list) else [value]
+    for item in items:
+        if not isinstance(item, str):
+            continue
+        normalized = item.replace(" ", "")
         if upper:
             normalized = normalized.upper()
-        return normalized
-    return ""
+        if normalized:
+            values.append(normalized)
+    return values
 
 
 def get_balance(
@@ -120,13 +114,14 @@ def get_specific_balance(
         resolved_id = 0  # explicit placeholder to avoid 'None'
 
     mode_value = 0 if mode is None else mode
-    iban_value = _normalize_multi_value(IBAN, separator=",")
-    currency_value = _normalize_multi_value(currencyTag, separator=",", upper=True)
+    iban_list = _normalize_multi_value(IBAN)
+    currency_list = _normalize_multi_value(currencyTag, upper=True)
 
     # Backend expects 'customerid' in the function string; keep schema using client_id for the LLM.
     line_to_return = (
         f"get_balance(customerid={resolved_id},mode={mode_value},"
-        f"treatyid={treatyid},IBAN={iban_value},currencyTag={currency_value})"
+        f"treatyid={treatyid},IBAN={json.dumps(iban_list, ensure_ascii=False)},"
+        f"currencyTag={json.dumps(currency_list, ensure_ascii=False)})"
     )
     logger.info(f"get_specific_balance() tool return: {line_to_return}")
     return ToolExecutionResult(
