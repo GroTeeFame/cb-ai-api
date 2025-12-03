@@ -1,8 +1,11 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 
 from app.schemas.inbound import ChatbotMessage
 from app.schemas.state import ConversationState
+
+HISTORY_TTL = timedelta(hours=24)
 
 
 class ConversationStateStore:
@@ -26,13 +29,16 @@ class ConversationStateStore:
         """Fetch conversation state and hydrate with the latest chatbot context."""
         async with self._ensure_lock():
             state = self._states.get(payload.chat_id)
-            if state is None:
+            now = datetime.now(timezone.utc)
+            if state is None or (now - state.last_updated) > HISTORY_TTL:
                 state = ConversationState(chat_id=payload.chat_id)
             state.merge_inbound_context(payload.context)
+            state.touch()
             self._states[payload.chat_id] = state
             return state.clone()
 
     async def persist(self, state: ConversationState) -> None:
         """Persist the latest conversation snapshot."""
         async with self._ensure_lock():
+            state.touch()
             self._states[state.chat_id] = state.clone()

@@ -40,12 +40,14 @@ class LLMOrchestrator:
         self._llm_client: Optional[AzureOpenAIClient] = None
         self._state_store = state_store or ConversationStateStore()
         self._default_language = default_language
+        self._max_history_messages = 20
 
     async def handle_turn(self, payload: ChatbotMessage) -> AgentReply:
         """Main entry point for a chatbot message."""
         state = await self._state_store.load(payload)
 
         try:
+            self._append_user_message(state, payload)
             completion = await self._invoke_llm(payload, state)
             agent_reply = await self._build_agent_reply(payload, completion, state)
         except Exception as exc:  # pragma: no cover - defensive fallback
@@ -54,6 +56,7 @@ class LLMOrchestrator:
 
         if agent_reply.context_updates:
             state.apply_updates(agent_reply.context_updates)
+        self._maybe_store_assistant_reply(agent_reply, state)
         await self._state_store.persist(state)
         return agent_reply
 
@@ -109,26 +112,9 @@ class LLMOrchestrator:
     def _build_messages(
         self, payload: ChatbotMessage, state: ConversationState
     ) -> List[Dict[str, Any]]:
-        language = state.language or payload.context.language or self._default_language
-
-        user_payload = {
-            "chat_id": payload.chat_id,
-            "user_id": payload.user_id,
-            "message_id": payload.message_id,
-            "language": language,
-            "slots": state.slots,
-            "text": payload.text,
-        }
-
-        user_content = (
-            "Below is the latest customer input and known context.\n"
-            f"```json\n{json.dumps(user_payload, ensure_ascii=False, indent=2)}\n```"
-        )
-
-        return [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ]
+        messages: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages.extend(state.history)
+        return messages
 
     def _available_tools(self, state: ConversationState) -> Optional[List[Dict[str, Any]]]:
         return tool_schemas()
@@ -409,3 +395,43 @@ class LLMOrchestrator:
             return "\n".join(part for part in collected if part).strip()
 
         return ""
+
+    def _append_user_message(self, state: ConversationState, payload: ChatbotMessage) -> None:
+        """Store the current user message in history."""
+        language = state.language or payload.context.language or self._default_language
+        state.append_history(
+            "user",
+            self._render_user_content(payload, state, language),
+            max_messages=self._max_history_messages,
+        )
+
+    def _maybe_store_assistant_reply(self, reply: AgentReply, state: ConversationState) -> None:
+        """Persist assistant reply into history if it's a textual send event."""
+        if reply.event != "send" or not reply.data:
+            return
+        state.append_history(
+            "assistant",
+            str(reply.data),
+            max_messages=self._max_history_messages,
+        )
+
+    @staticmethod
+    def _render_user_content(
+        payload: ChatbotMessage,
+        state: ConversationState,
+        language: str,
+    ) -> str:
+        """Render user input plus known context for the LLM."""
+        user_payload = {
+            "chat_id": payload.chat_id,
+            "user_id": payload.user_id,
+            "message_id": payload.message_id,
+            "language": language,
+            "slots": state.slots,
+            "text": payload.text,
+        }
+
+        return (
+            "Below is the latest customer input and known context.\n"
+            f"```json\n{json.dumps(user_payload, ensure_ascii=False, indent=2)}\n```"
+        )

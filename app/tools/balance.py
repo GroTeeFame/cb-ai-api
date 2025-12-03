@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-import requests
 import logging
 
 from app.schemas.state import ConversationState
@@ -16,20 +15,24 @@ CLIENT_SERVICE_BASE_URL = "http://127.0.0.1:8001"
 # CLIENT_SERVICE_BASE_URL = "http://127.0.0.1:8001"
 
 
-# def _resolve_client_id(
-#     provided_id: Optional[int],
-#     state: Optional[ConversationState],
-# ) -> Optional[int]:
-#     if provided_id is not None:
-#         return int(provided_id)
-#     if state:
-#         stored = state.slots.get("client_id")
-#         if stored is not None:
-#             try:
-#                 return int(stored)
-#             except (TypeError, ValueError):
-#                 return None
-#     return None
+def _resolve_client_id(
+    provided_id: Optional[int],
+    state: Optional[ConversationState],
+) -> Optional[int]:
+    if provided_id is not None:
+        try:
+            return int(provided_id)
+        except (TypeError, ValueError):
+            return None
+    if state:
+        for key in ("client_id", "customerid", "customer_id"):
+            stored = state.slots.get(key) or state.metadata.get(key)
+            if stored is not None:
+                try:
+                    return int(stored)
+                except (TypeError, ValueError):
+                    continue
+    return None
 
 
 def _language_bundle(language: Optional[str]) -> Dict[str, str]:
@@ -69,108 +72,149 @@ def get_balance(
 def get_specific_balance(
     *,
     client_id: Optional[int],
-    account: Optional[str] = None,
-    mode: Optional[int] = None,
+    mode: Optional[int] = 1,
+    treatyid: Optional[int] = None,
+    IBAN: Optional[str] = None,
+    currencyTag: Optional[str] = None,
     state: Optional[ConversationState],
     language: Optional[str],
 ) -> ToolExecutionResult:
     """
-    Get list with all accounts and its balances, to give answer to user with LLM.
+    Indicate that the chatbot backend should find and present client balance to client.
+
+    The legacy system already holds every parameter, so the AI agent simply declares the intent.
     """
-    #TODO: Right now we search for IBAN with code, NOT by model reasoning. It works, but it will fail if user write IBAN with errors. We can give model opportunity to find needed IBAN by herself, for this we need to delete code part in this function for search of IBAN, and send full list of IBAN back to LLM for reasoning.
-    strings = _language_bundle(language)
-    if client_id is None:
-        logger.warning("get_specific_balance() missing client_id")
-        return ToolExecutionResult(
-            event='function',
-            data='get_balance',
-            context_updates={},
-            post_process=False,
-        )
+    resolved_id = _resolve_client_id(client_id, state)
+    if resolved_id is None:
+        logger.warning("get_specific_balance() missing client_id/customerid")
+        resolved_id = 0  # explicit placeholder to avoid 'None'
 
-    account_normalized = account.replace(" ", "") if account else None
-    mode_value = 0 if mode is None else mode
-    logger.info(
-        "get_specific_balance() request",
-        extra={"client_id": client_id, "mode": mode_value, "account": account_normalized},
+    mode_value = 1 if mode is None else mode
+    iban_value = IBAN.replace(" ", "") if IBAN else ""
+    currency_value = currencyTag.upper() if currencyTag else ""
+
+    # Backend expects 'customerid' in the function string; keep schema using client_id for the LLM.
+    line_to_return = (
+        f"get_balance(customerid={resolved_id},mode={mode_value},"
+        f"treatyid={treatyid},IBAN={iban_value},currencyTag={currency_value})"
     )
-
-    try:
-        params = {
-            "clientid": client_id,
-            "mode": mode_value,
-        }
-        logger.info("get_specific_balance() params", extra=params)
-        response = requests.get(
-            f"{BANK_API_BASE_URL}/api/chatbot/accounts",
-            params=params,
-            proxies={"http": None, "https": None},
-            headers={"Content-Type": "application/json"},
-            timeout=20,
-        )
-
-        logger.info("get_specific_balance() response", extra={"status": response.status_code})
-        response.raise_for_status()
-        payload = response.json()
-        logger.info("get_specific_balance() payload", extra={"payload": payload})
-
-    except requests.RequestException as exc:
-        logger.warning("get_specific_exchange() failed: %s", exc)
-        #TODO: here we can use two solution, we can send error to chatbot -> client.
-        #TODO: or we not send error, instead we send to chatbot command to execute this from its beckend
-        # return ToolExecutionResult(event='send', data=strings["error"])
-        
-        return ToolExecutionResult(
-            event='function',
-            data='get_balance',
-            context_updates={},
-            post_process=False,
-        )
-    if not payload:
-        return ToolExecutionResult(
-            event='function',
-            data='get_balance',
-            context_updates={},
-            post_process=False,
-        )
-
-    if account_normalized:
-        # Find the specific account by IBAN/account number.
-        match = None
-        if isinstance(payload, list):
-            for entry in payload:
-                entry_iban = str(entry.get("IBAN", "")).replace(" ", "")
-                if entry_iban == account_normalized:
-                    match = entry
-                    break
-        if match:
-            amount = match.get("amountRest", "")
-            currency = match.get("currencyTag", "")
-            message = strings["balance_template"].format(
-                account=account_normalized,
-                amount=amount,
-                currency=currency,
-            )
-            return ToolExecutionResult(
-                event='send',
-                data=message,
-                context_updates={},
-                post_process=False,
-            )
-        return ToolExecutionResult(
-            event='send',
-            data=strings["not_found"].format(account=account_normalized),
-            context_updates={},
-            post_process=False,
-        )
-
     return ToolExecutionResult(
-        event='send',
-        data=payload,
+        event="function",
+        data=line_to_return,
         context_updates={},
-        post_process=True,
+        post_process=False,
     )
 
+
+##TODO: WORKING tool, just dont needed right now ---<
+# def get_specific_balance(
+#     *,
+#     client_id: Optional[int],
+#     account: Optional[str] = None,
+#     mode: Optional[int] = None,
+#     state: Optional[ConversationState],
+#     language: Optional[str],
+# ) -> ToolExecutionResult:
+#     """
+#     Get list with all accounts and its balances, to give answer to user with LLM.
+#     """
+#     #TODO: Right now we search for IBAN with code, NOT by model reasoning. It works, but it will fail if user write IBAN with errors. We can give model opportunity to find needed IBAN by herself, for this we need to delete code part in this function for search of IBAN, and send full list of IBAN back to LLM for reasoning.
+#     strings = _language_bundle(language)
+#     if client_id is None:
+#         logger.warning("get_specific_balance() missing client_id")
+#         return ToolExecutionResult(
+#             event='function',
+#             data='get_balance',
+#             context_updates={},
+#             post_process=False,
+#         )
+
+#     account_normalized = account.replace(" ", "") if account else None
+#     mode_value = 0 if mode is None else mode
+#     logger.info(
+#         "get_specific_balance() request",
+#         extra={"client_id": client_id, "mode": mode_value, "account": account_normalized},
+#     )
+
+#     try:
+#         params = {
+#             "clientid": client_id,
+#             "mode": mode_value,
+#         }
+#         logger.info("get_specific_balance() params", extra=params)
+#         response = requests.get(
+#             # f"{CLIENT_SERVICE_BASE_URL}/accounts", ##FIXME: for local dev testing
+#             f"{BANK_API_BASE_URL}/api/chatbot/accounts", 
+#             params=params,
+#             proxies={"http": None, "https": None},
+#             headers={"Content-Type": "application/json"},
+#             timeout=20,
+#         )
+
+#         logger.info("get_specific_balance() response", extra={"status": response.status_code})
+#         response.raise_for_status()
+#         payload = response.json()
+#         logger.info("get_specific_balance() payload", extra={"payload": payload})
+
+#     except requests.RequestException as exc:
+#         logger.warning("get_specific_exchange() failed: %s", exc)
+#         #TODO: here we can use two solution, we can send error to chatbot -> client.
+#         #TODO: or we not send error, instead we send to chatbot command to execute this from its beckend
+#         # return ToolExecutionResult(event='send', data=strings["error"])
+        
+#         return ToolExecutionResult(
+#             event='function',
+#             data='get_balance',
+#             context_updates={},
+#             post_process=False,
+#         )
+#     if not payload:
+#         return ToolExecutionResult(
+#             event='function',
+#             data='get_balance',
+#             context_updates={},
+#             post_process=False,
+#         )
+
+#     if account_normalized:
+#         # Find the specific account by IBAN/account number.
+#         match = None
+#         if isinstance(payload, list):
+#             for entry in payload:
+#                 entry_iban = str(entry.get("IBAN", "")).replace(" ", "")
+#                 if entry_iban == account_normalized:
+#                     match = entry
+#                     break
+#         if match:
+#             amount = match.get("amountRest", "")
+#             currency = match.get("currencyTag", "")
+#             message = strings["balance_template"].format(
+#                 account=account_normalized,
+#                 amount=amount,
+#                 currency=currency,
+#             )
+#             return ToolExecutionResult(
+#                 event='send',
+#                 data=message,
+#                 context_updates={},
+#                 post_process=False,
+#             )
+#         return ToolExecutionResult(
+#             event='send',
+#             data=strings["not_found"].format(account=account_normalized),
+#             context_updates={},
+#             post_process=False,
+#         )
+
+#     return ToolExecutionResult(
+#         event='send',
+#         data=payload,
+#         context_updates={},
+#         post_process=True,
+#     )
+##TODO: WORKING tool, just dont needed right now --->
+
+CURRENCY_LIST = ["UAH", "USD", "EUR"]
 
 BALANCE_TOOLS: list[Dict[str, Any]] = [
     {
@@ -193,7 +237,9 @@ BALANCE_TOOLS: list[Dict[str, Any]] = [
         "function": {
             "name": "get_specific_balance",
             "description": (
-                "Request the list with all user accounts and balances to give user answers about specific account and balance. with LLM processing. Use this tool if user ask you about specific balance or specific currency of balance, or mentioned IBAN."
+                "Emit a function call instruction for the chatbot backend. If user ask about specific balance, or want to get balance, use this tool."
+                # "Request the legacy chatbot backend to find and send specific account balance to client. If user ask about specific balance, or want to get balance, use this tool."
+                # "Request the list with all user accounts and balances to give user answers about specific account and balance. with LLM processing. Use this tool if user ask you about specific balance or specific currency of balance, or mentioned IBAN."
             ),
             "parameters": {
                 "type": "object",
@@ -204,25 +250,110 @@ BALANCE_TOOLS: list[Dict[str, Any]] = [
                             "Identifier of the client in bank database"
                         ),
                     },
-                    "account": {
-                        "type": "string",
-                        "description": (
-                            "Account number or IBAN the user is asking about."
-                        ),
-                    },
                     "mode": {
                         "type": "integer",
                         "description": (
                             "Identifier of kind of search for account/balance search."
                         )
-                    }
+                    },
+                    "treatyid": {
+                        "type": "integer",
+                        "description": (
+                            "Document identifier the user is asking about."
+                        ),
+                    },
+                    "IBAN": {
+                        "type": "string",
+                        "description": (
+                            "Account number or IBAN the user is asking about."
+                        ),
+                    },
+                    "currencyTag": {
+                        "type": "string",
+                        "enum": CURRENCY_LIST,
+                        "description": (
+                            "Currency identifier the user is asking about."
+                        ),
+                    },
                 },
                 "required": ["client_id"],
                 "additionalProperties": False,
             },
         },
     },
+##TODO: WORKING tool, just dont needed right now ---<
+    # {
+    #     "type": "function",
+    #     "function": {
+    #         "name": "get_specific_balance",
+    #         "description": (
+    #             "Request the list with all user accounts and balances to give user answers about specific account and balance. with LLM processing. Use this tool if user ask you about specific balance or specific currency of balance, or mentioned IBAN."
+    #         ),
+    #         "parameters": {
+    #             "type": "object",
+    #             "properties": {
+    #                 "client_id": {
+    #                     "type": "integer",
+    #                     "description": (
+    #                         "Identifier of the client in bank database"
+    #                     ),
+    #                 },
+    #                 "account": {
+    #                     "type": "string",
+    #                     "description": (
+    #                         "Account number or IBAN the user is asking about."
+    #                     ),
+    #                 },
+    #                 "mode": {
+    #                     "type": "integer",
+    #                     "description": (
+    #                         "Identifier of kind of search for account/balance search."
+    #                     )
+    #                 }
+    #             },
+    #             "required": ["client_id"],
+    #             "additionalProperties": False,
+    #         },
+    #     },
+    # },
+##TODO: WORKING tool, just dont needed right now --->
+
 ]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # def lookup_client_balances(
 #     *,
