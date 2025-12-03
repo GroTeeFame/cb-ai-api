@@ -5,7 +5,8 @@ from typing import Dict, Optional
 from app.schemas.inbound import ChatbotMessage
 from app.schemas.state import ConversationState
 
-HISTORY_TTL = timedelta(hours=24)
+# HISTORY_TTL = timedelta(hours=24)
+HISTORY_TTL = timedelta(hours=2)
 
 
 class ConversationStateStore:
