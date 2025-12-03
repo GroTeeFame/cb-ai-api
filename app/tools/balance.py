@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import logging
 
@@ -51,6 +51,34 @@ def _language_bundle(language: Optional[str]) -> Dict[str, str]:
     }
 
 
+def _normalize_multi_value(
+    value: Optional[Union[str, List[str]]],
+    *,
+    separator: str = ",",
+    upper: bool = False,
+) -> str:
+    """Normalize single or multiple string values into a single string."""
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            normalized = item.replace(" ", "")
+            if upper:
+                normalized = normalized.upper()
+            if normalized:
+                parts.append(normalized)
+        return separator.join(parts)
+    if isinstance(value, str):
+        normalized = value.replace(" ", "")
+        if upper:
+            normalized = normalized.upper()
+        return normalized
+    return ""
+
+
 def get_balance(
     *,
     client_id: Optional[int],
@@ -73,10 +101,10 @@ def get_balance(
 def get_specific_balance(
     *,
     client_id: Optional[int],
-    mode: Optional[int] = 1,
+    mode: Optional[int] = 0,
     treatyid: Optional[int] = None,
-    IBAN: Optional[str] = None,
-    currencyTag: Optional[str] = None,
+    IBAN: Optional[Union[str, List[str]]] = None,
+    currencyTag: Optional[Union[str, List[str]]] = None,
     state: Optional[ConversationState],
     language: Optional[str],
 ) -> ToolExecutionResult:
@@ -91,9 +119,9 @@ def get_specific_balance(
         logger.warning("get_specific_balance() missing client_id/customerid")
         resolved_id = 0  # explicit placeholder to avoid 'None'
 
-    mode_value = 1 if mode is None else mode
-    iban_value = IBAN.replace(" ", "") if IBAN else ""
-    currency_value = currencyTag.upper() if currencyTag else ""
+    mode_value = 0 if mode is None else mode
+    iban_value = _normalize_multi_value(IBAN, separator=",")
+    currency_value = _normalize_multi_value(currencyTag, separator=",", upper=True)
 
     # Backend expects 'customerid' in the function string; keep schema using client_id for the LLM.
     line_to_return = (
@@ -266,16 +294,27 @@ BALANCE_TOOLS: list[Dict[str, Any]] = [
                         ),
                     },
                     "IBAN": {
-                        "type": "string",
+                        "oneOf": [
+                            {"type": "string"},
+                            {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        ],
                         "description": (
-                            "Account number or IBAN the user is asking about."
+                            "Account number or IBAN the user is asking about (string or array of strings)."
                         ),
                     },
                     "currencyTag": {
-                        "type": "string",
-                        "enum": CURRENCY_LIST,
+                        "oneOf": [
+                            {"type": "string", "enum": CURRENCY_LIST},
+                            {
+                                "type": "array",
+                                "items": {"type": "string", "enum": CURRENCY_LIST},
+                            },
+                        ],
                         "description": (
-                            "Currency identifier the user is asking about."
+                            "Currency identifier(s) the user is asking about (string or array)."
                         ),
                     },
                 },
