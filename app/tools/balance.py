@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Union
 import json
-
 import logging
+import requests
 
 from app.schemas.state import ConversationState
 from app.tools.types import ToolExecutionResult
@@ -73,6 +73,44 @@ def _normalize_multi_value(
     return values
 
 
+def _resolve_accounts_by_fragment(*, client_id: int, fragment: str) -> List[str]:
+    """Fetch accounts and return IBANs that match the fragment (prefix/suffix)."""
+    logger.info(f"_resolve_accounts_by_fragment() usage with: fragment={fragment}")
+    fragment_clean = fragment.replace(" ", "")
+    if not fragment_clean:
+        return []
+
+    try:
+        response = requests.get(
+            f"{BANK_API_BASE_URL}/api/chatbot/accounts",
+            # f"{CLIENT_SERVICE_BASE_URL}/accounts",
+            params={"clientid": client_id, "mode": 0},
+            proxies={"http": None, "https": None},
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        logger.info(f"_resolve_accounts_by_fragment() answer from API: payload={payload}")
+
+    except requests.RequestException as exc:
+        logger.warning("Failed to resolve accounts for fragment '%s': %s", fragment, exc)
+        return []
+
+    matches: List[str] = []
+    if isinstance(payload, list):
+        for entry in payload:
+            iban = str(entry.get("IBAN", "")).replace(" ", "")
+            if not iban:
+                continue
+            if iban.endswith(fragment_clean) or iban.startswith(fragment_clean):
+                matches.append(iban)
+    
+    logger.info(f"_resolve_accounts_by_fragment() return: matches={matches}")
+    
+    return matches
+
+
 def get_balance(
     *,
     client_id: Optional[int],
@@ -99,6 +137,7 @@ def get_specific_balance(
     treatyid: Optional[int] = None,
     IBAN: Optional[Union[str, List[str]]] = None,
     currencyTag: Optional[Union[str, List[str]]] = None,
+    account_fragment: Optional[str] = None,
     state: Optional[ConversationState],
     language: Optional[str],
 ) -> ToolExecutionResult:
@@ -108,6 +147,7 @@ def get_specific_balance(
     The legacy system already holds every parameter, so the AI agent simply declares the intent.
     """
     logger.info("get_specific_balance() tool usage")
+    logger.info(f"get_specific_balance() tool parameters: client_id={client_id}, mode={mode}, treatyid={treatyid}, IBAN={IBAN}, currencyTag={currencyTag}, account_fragment={account_fragment}")
     resolved_id = _resolve_client_id(client_id, state)
     if resolved_id is None:
         logger.warning("get_specific_balance() missing client_id/customerid")
@@ -115,7 +155,43 @@ def get_specific_balance(
 
     mode_value = 0 if mode is None else mode
     iban_list = _normalize_multi_value(IBAN)
+    short_fragments: List[str] = []
+    if iban_list:
+        # Treat very short entries as fragments rather than full IBANs.
+        filtered_ibans: List[str] = []
+        for item in iban_list:
+            if len(item) < 12:
+                short_fragments.append(item)
+            else:
+                filtered_ibans.append(item)
+        iban_list = filtered_ibans
     currency_list = _normalize_multi_value(currencyTag, upper=True)
+
+    # If we only have partial hints, try to resolve full IBANs via bank API.
+    fragment_candidates: List[str] = []
+    if account_fragment:
+        fragment_candidates.append(account_fragment.replace(" ", ""))
+    fragment_candidates.extend(short_fragments)
+
+    if not iban_list and fragment_candidates:
+        resolved_ibans: List[str] = []
+        for frag in fragment_candidates:
+            resolved_ibans.extend(
+                _resolve_accounts_by_fragment(
+                    client_id=resolved_id,
+                    fragment=frag,
+                )
+            )
+        if resolved_ibans:
+            # Deduplicate while preserving order.
+            seen = set()
+            unique_ibans: List[str] = []
+            for iban in resolved_ibans:
+                if iban in seen:
+                    continue
+                seen.add(iban)
+                unique_ibans.append(iban)
+            iban_list = unique_ibans
 
     # Backend expects 'customerid' in the function string; keep schema using client_id for the LLM.
     line_to_return = (
@@ -285,7 +361,7 @@ BALANCE_TOOLS: list[Dict[str, Any]] = [
                     "treatyid": {
                         "type": "integer",
                         "description": (
-                            "Document identifier the user is asking about."
+                            "Contract identifier, in this case its always must be empty."
                         ),
                     },
                     "IBAN": {
