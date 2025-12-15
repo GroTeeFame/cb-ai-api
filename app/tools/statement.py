@@ -116,8 +116,10 @@ def get_statement(
     """
 
     format_pattern = "%Y-%m-%d"
-    DATEFROM = datetime.datetime.strptime(datefrom, format_pattern)
-    DATEINTO = datetime.datetime.strptime(dateinto, format_pattern)
+    # DATEFROM = datetime.datetime.strptime(datefrom, format_pattern)
+    DATEFROM = datetime.date.fromisoformat(datefrom[:10])
+    # DATEINTO = datetime.datetime.strptime(dateinto, format_pattern)
+    DATEINTO = datetime.date.fromisoformat(dateinto[:10])
 
     logger.info("get_statement() tool usage")
     logger.info(
