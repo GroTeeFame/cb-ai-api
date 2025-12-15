@@ -117,14 +117,14 @@ def get_statement(
 
     logger.info("get_statement() tool usage")
     logger.info(
-        f"get_statement() tool parameters: accountid={accountid}, datefrom= {datefrom}, dateinto= {dateinto}"
+        f"get_statement() tool parameters: accountid={accountid}, DAREFROM= {datefrom}, DATEINTO= {dateinto}"
     )
     # logger.info(
     #     "get_statement() tool parameters",
     #     extra={"accountid": accountid, "datefrom": datefrom, "dateinto": dateinto},
     # )
 
-    call = f"get_statement(accountid={accountid},datefrom={datefrom},dateinto={dateinto})"
+    call = f"get_statement(accountid={accountid},datefrom={datefrom.strftime("%Y-%m-%d")},dateinto={dateinto})"
     logger.info(f"MAKING CALL TO BANK API WITH CALL: call={call}")
     return ToolExecutionResult(
         event="function",
