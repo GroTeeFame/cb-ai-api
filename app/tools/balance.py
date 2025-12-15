@@ -259,7 +259,7 @@ def get_specific_balance(
 #         logger.info("get_specific_balance() payload", extra={"payload": payload})
 
 #     except requests.RequestException as exc:
-#         logger.warning("get_specific_exchange() failed: %s", exc)
+#         logger.warning("get_specific_balance() failed: %s", exc)
 #         #TODO: here we can use two solution, we can send error to chatbot -> client.
 #         #TODO: or we not send error, instead we send to chatbot command to execute this from its beckend
 #         # return ToolExecutionResult(event='send', data=strings["error"])

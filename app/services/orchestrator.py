@@ -1,6 +1,8 @@
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from app.clients.azure_openai import AzureOpenAIClient
 from app.schemas.inbound import ChatbotMessage
@@ -17,12 +19,24 @@ from app.tools.types import ToolExecutionResult
 
 logger = logging.getLogger(__name__)
 
+# SYSTEM_PROMPT = (
+#     "You are a compliant digital banking assistant serving retail clients in Ukraine. "
+#     "Respond only using Ukrainian language. "
+#     "If the request requires back-end actions, decide whether to call an available tool. "
+#     "Never invent account information. When unsure, ask follow-up questions. "
+#     "If the user asks about bank branches, first ask which city they are looking for. "
+#     "When tools are available, prefer calling them immediately over promising future actions. "
+#     "For bank statements/extracts: if accountid is unknown, call get_client_accounts_info to fetch accounts, then choose the correct account (by currency/IBAN fragment) and call get_statement with accountid and date range in the SAME turn. Do not wait for extra user prompts if you already have the needed details."
+# )
+
 SYSTEM_PROMPT = (
     "You are a compliant digital banking assistant serving retail clients in Ukraine. "
     "Respond only using Ukrainian language. "
     "If the request requires back-end actions, decide whether to call an available tool. "
-    "Never invent account information. When unsure, ask follow-up questions."
-    "If user ask about bank branches, firs ask about city in with user looking for bank branch"
+    "Never invent account information. When unsure, ask follow-up questions. "
+    "If the user asks about bank branches, first ask which city they are looking for. "
+    "When tools are available, prefer calling them immediately over promising future actions. "
+    "For bank statements/extracts: if accountid is unknown, call get_client_accounts_info to fetch accounts, then choose the correct account (by currency/IBAN fragment) and call get_statement with accountid and date range in the SAME turn. If you have all the info to use statement tool, prompt user with all the info to get permission to use tool. "
 )
 
 
@@ -422,6 +436,8 @@ class LLMOrchestrator:
         language: str,
     ) -> str:
         """Render user input plus known context for the LLM."""
+        tz_name = state.metadata.get("timezone") or payload.context.timezone
+        now_iso, tz_used = LLMOrchestrator._current_timestamp(tz_name)
         user_payload = {
             "chat_id": payload.chat_id,
             "user_id": payload.user_id,
@@ -429,9 +445,28 @@ class LLMOrchestrator:
             "language": language,
             "slots": state.slots,
             "text": payload.text,
+            "timestamp": {
+                "iso": now_iso,
+                "timezone": tz_used,
+            },
         }
 
         return (
             "Below is the latest customer input and known context.\n"
             f"```json\n{json.dumps(user_payload, ensure_ascii=False, indent=2)}\n```"
         )
+
+    @staticmethod
+    def _current_timestamp(tz_name: Optional[str]) -> tuple[str, str]:
+        """Return current timestamp and timezone used, defaulting to UTC."""
+        tz = timezone.utc
+        tz_used = "UTC"
+        if tz_name:
+            try:
+                tz = ZoneInfo(tz_name)
+                tz_used = tz.key if hasattr(tz, "key") else str(tz)
+            except Exception:
+                tz = timezone.utc
+                tz_used = "UTC"
+        now_iso = datetime.now(tz=tz).isoformat()
+        return now_iso, tz_used
