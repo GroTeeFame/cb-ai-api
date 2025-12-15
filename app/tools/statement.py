@@ -125,6 +125,7 @@ def get_statement(
     # )
 
     call = f"get_statement(accountid={accountid},datefrom={datefrom},dateinto={dateinto})"
+    logger.info(f"MAKING CALL TO BANK API WITH CALL: call={call}")
     return ToolExecutionResult(
         event="function",
         data=call,
