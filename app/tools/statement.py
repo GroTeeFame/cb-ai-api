@@ -58,8 +58,8 @@ def get_client_accounts_info(
     try:
         params = {"clientid": resolved_id, "mode": 0}
         response = requests.get(
-            f"{BANK_API_BASE_URL}/api/chatbot/accounts",
-            # f"{CLIENT_SERVICE_BASE_URL}/accounts", 
+            # f"{BANK_API_BASE_URL}/api/chatbot/accounts",
+            f"{CLIENT_SERVICE_BASE_URL}/accounts", 
             params=params,
             proxies={"http": None, "https": None},
             headers={"Content-Type": "application/json"},
@@ -115,16 +115,16 @@ def get_statement(
     :rtype: ToolExecutionResult
     """
 
+    format_pattern = "%Y-%m-%d"
+    DATEFROM = datetime.datetime.strptime(datefrom, format_pattern)
+    DATEINTO = datetime.datetime.strptime(dateinto, format_pattern)
+
     logger.info("get_statement() tool usage")
     logger.info(
-        f"get_statement() tool parameters: accountid={accountid}, DAREFROM= {datefrom}, DATEINTO= {dateinto}"
+        f"get_statement() tool parameters: accountid={accountid}, DATEFROM= {DATEFROM}, DATEINTO= {DATEINTO}"
     )
-    # logger.info(
-    #     "get_statement() tool parameters",
-    #     extra={"accountid": accountid, "datefrom": datefrom, "dateinto": dateinto},
-    # )
 
-    call = f"get_statement(accountid={accountid},datefrom={datefrom.strftime("%Y-%m-%d")},dateinto={dateinto})"
+    call = f"get_statement(accountid={accountid},DATEFROM={DATEFROM},DATEINTO={DATEINTO})"
     logger.info(f"MAKING CALL TO BANK API WITH CALL: call={call}")
     return ToolExecutionResult(
         event="function",
