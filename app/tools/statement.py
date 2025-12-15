@@ -58,8 +58,8 @@ def get_client_accounts_info(
     try:
         params = {"clientid": resolved_id, "mode": 0}
         response = requests.get(
-            # f"{BANK_API_BASE_URL}/api/chatbot/accounts",
-            f"{CLIENT_SERVICE_BASE_URL}/accounts", 
+            f"{BANK_API_BASE_URL}/api/chatbot/accounts",
+            # f"{CLIENT_SERVICE_BASE_URL}/accounts", 
             params=params,
             proxies={"http": None, "https": None},
             headers={"Content-Type": "application/json"},
