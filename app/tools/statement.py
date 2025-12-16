@@ -38,16 +38,17 @@ def _resolve_client_id(
 
 def get_client_accounts_info(
     *,
-    client_id: Optional[int] = None,
-    state: Optional[ConversationState] = None,
-    language: Optional[str] = None,
+    client_id: Optional[int],
+    state: Optional[ConversationState],
+    language: Optional[str],
 ) -> ToolExecutionResult:
     """
     Fetch client accounts to let the LLM choose an account for statements.
     """
+    logger.info(f"get_client_accounts_info() usage inside statement.py")
+    logger.info(f"get_client_accounts_info() tool parameters: client_id={client_id}")
     resolved_id = _resolve_client_id(client_id, state)
     if resolved_id is None:
-        logger.warning("get_client_accounts_info() missing client_id")
         logger.warning("get_client_accounts_info() missing client_id/customerid") #FIXME: 
         resolved_id = 0  # explicit placeholder to avoid 'None'
         # return ToolExecutionResult(
@@ -153,10 +154,10 @@ STATEMENT_TOOLS: list[Dict[str, Any]] = [
                 "properties": {
                     "client_id": {
                         "type": "integer",
-                        "description": "Numeric client identifier in the bank system.",
+                        "description": "Identifier of the client in bank database",
                     }
                 },
-                "required": [],
+                "required": ["client_id"],
                 "additionalProperties": False,
             },
         },
