@@ -61,6 +61,9 @@ class LLMOrchestrator:
         """Main entry point for a chatbot message."""
         state = await self._state_store.load(payload)
 
+        logger.info(f"receive message from chatbot in turn endpoint")
+        logger.info(f"chatbot message payload: {payload}")
+
         try:
             self._append_user_message(state, payload)
             completion = await self._invoke_llm(payload, state)

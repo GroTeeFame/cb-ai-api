@@ -48,12 +48,14 @@ def get_client_accounts_info(
     resolved_id = _resolve_client_id(client_id, state)
     if resolved_id is None:
         logger.warning("get_client_accounts_info() missing client_id")
-        return ToolExecutionResult(
-            event="send",
-            data="Потрібен ідентифікатор клієнта, щоб отримати рахунки.",
-            context_updates={},
-            post_process=False,
-        ) 
+        logger.warning("get_client_accounts_info() missing client_id/customerid") #FIXME: 
+        resolved_id = 0  # explicit placeholder to avoid 'None'
+        # return ToolExecutionResult(
+        #     event="send",
+        #     data="Потрібен ідентифікатор клієнта, щоб отримати рахунки.",
+        #     context_updates={},
+        #     post_process=False,
+        # ) 
 
     try:
         params = {"clientid": resolved_id, "mode": 0}
