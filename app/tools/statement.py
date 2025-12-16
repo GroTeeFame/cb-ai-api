@@ -73,7 +73,7 @@ def get_client_accounts_info(
         logger.info("get_client_accounts_info() response", extra={"status": response.status_code})
         response.raise_for_status()
         payload = response.json()
-        logger.info("get_client_accounts_info() payload", extra={"payload": payload})
+        logger.info(f"get_client_accounts_info() payload answer from API: payload={payload}")
     except requests.RequestException as exc:
         logger.warning("get_client_accounts_info() failed: %s", exc)
         return ToolExecutionResult(
