@@ -57,6 +57,8 @@ def get_client_accounts_info(
         #     post_process=False,
         # ) 
 
+    logger.info(f"get_client_accounts_info() inside statement.py, resolved_id = {resolved_id}") #TODO:
+
     try:
         params = {"clientid": resolved_id, "mode": 0}
         response = requests.get(

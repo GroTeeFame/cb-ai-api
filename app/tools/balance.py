@@ -152,6 +152,8 @@ def get_specific_balance(
     if resolved_id is None:
         logger.warning("get_specific_balance() missing client_id/customerid") #FIXME: 
         resolved_id = 0  # explicit placeholder to avoid 'None'
+    
+    logger.info(f"get_specific_balance() inside balance.py, resolved_id = {resolved_id}") #TODO:
 
     mode_value = 0 if mode is None else mode
     iban_list = _normalize_multi_value(IBAN)
