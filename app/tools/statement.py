@@ -63,8 +63,8 @@ def get_client_accounts_info(
     try:
         params = {"clientid": resolved_id, "mode": 0}
         response = requests.get(
-            f"{BANK_API_BASE_URL}/api/chatbot/accounts",
-            # f"{CLIENT_SERVICE_BASE_URL}/accounts", 
+            # f"{BANK_API_BASE_URL}/api/chatbot/accounts",
+            f"{CLIENT_SERVICE_BASE_URL}/accounts", 
             params=params,
             proxies={"http": None, "https": None},
             headers={"Content-Type": "application/json"},
@@ -120,18 +120,30 @@ def get_statement(
     :rtype: ToolExecutionResult
     """
 
-    format_pattern = "%Y-%m-%d"
-    # DATEFROM = datetime.datetime.strptime(datefrom, format_pattern)
-    DATEFROM = datetime.date.fromisoformat(datefrom[:10])
-    # DATEINTO = datetime.datetime.strptime(dateinto, format_pattern)
-    DATEINTO = datetime.date.fromisoformat(dateinto[:10])
-
     logger.info("get_statement() tool usage")
     logger.info(
-        f"get_statement() tool parameters: accountid={accountid}, DATEFROM= {DATEFROM}, DATEINTO= {DATEINTO}"
+        f"get_statement() tool parameters: accountid={accountid}, DATEFROM= {datefrom}, DATEINTO= {dateinto}"
     )
 
-    call = f"get_extract(accountid={accountid},DATEFROM={DATEFROM},DATEINTO={DATEINTO})"
+    today = datetime.date.today()
+    try:
+        datefrom_parsed = datetime.date.fromisoformat(datefrom[:10]) if datefrom else today
+    except Exception:
+        datefrom_parsed = today
+
+    try:
+        dateinto_parsed = datetime.date.fromisoformat(dateinto[:10]) if dateinto else today
+    except Exception:
+        dateinto_parsed = today
+
+    if dateinto_parsed > today:
+        dateinto_parsed = today
+
+    call = (
+        f"get_extract(accountid={accountid},"
+        f"DATEFROM={datefrom_parsed.isoformat()},"
+        f"DATEINTO={dateinto_parsed.isoformat()})"
+    )
     logger.info(f"MAKING CALL TO BANK API WITH CALL: call={call}")
     return ToolExecutionResult(
         event="function",
