@@ -338,7 +338,19 @@ class LLMOrchestrator:
         if not choice:
             return self._fallback_reply(state)
 
-        reply_text = self._extract_text(getattr(choice, "message", None) or {})
+        message = getattr(choice, "message", None) or {}
+        tool_calls = getattr(message, "tool_calls", None)
+        if tool_calls:
+            reply = await self._handle_tool_calls(payload, tool_calls, state)
+            if context_updates and reply.context_updates:
+                reply.context_updates = merge_context_updates(
+                    [context_updates, reply.context_updates]
+                )
+            elif context_updates and not reply.context_updates:
+                reply.context_updates = context_updates
+            return reply
+
+        reply_text = self._extract_text(message)
         if not reply_text:
             return self._fallback_reply(state)
 
