@@ -136,6 +136,8 @@ def get_statement(
     except Exception:
         dateinto_parsed = today
 
+    if datefrom_parsed > today:
+        datefrom_parsed = today
     if dateinto_parsed > today:
         dateinto_parsed = today
 
