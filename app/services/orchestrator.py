@@ -63,8 +63,7 @@ class LLMOrchestrator:
         """Main entry point for a chatbot message."""
         state = await self._state_store.load(payload)
 
-        logger.info(f"receive message from chatbot in turn endpoint")
-        logger.info(f"chatbot message payload: {payload}")
+        logger.info(f"receive message from chatbot in turn endpoint; message payload: {payload}")
 
         try:
             self._append_user_message(state, payload)
@@ -77,6 +76,12 @@ class LLMOrchestrator:
         if agent_reply.context_updates:
             state.apply_updates(agent_reply.context_updates)
         self._maybe_store_assistant_reply(agent_reply, state)
+        self._log_agent_response(
+            chat_id=payload.chat_id,
+            event=agent_reply.event,
+            data=agent_reply.data,
+            entrypoint="turn",
+        )
         await self._state_store.persist(state)
         return agent_reply
 
@@ -103,7 +108,7 @@ class LLMOrchestrator:
             reply_text = self._extract_text(getattr(choice, "message", None) or {})
             if not reply_text:
                 raise ValueError("Azure OpenAI returned an empty response.")
-            return {
+            result = {
                 "event": "send",
                 "data": reply_text
             }
@@ -112,7 +117,7 @@ class LLMOrchestrator:
             logger.exception("Direct answer LLM call failed.")
             fallback_state = ConversationState(chat_id="direct", language=language_code)
             fallback_reply = self._fallback_reply(fallback_state, error=exc)
-            return {
+            result = {
                 "event": fallback_reply.event,
                 "data": fallback_reply.data,
             }
@@ -120,6 +125,13 @@ class LLMOrchestrator:
             #     "answer": fallback_reply.reply_text or "",
             #     "language": fallback_reply.reply_language or language_code,
             # }
+        self._log_agent_response(
+            chat_id="direct",
+            event=result["event"],
+            data=result["data"],
+            entrypoint="direct_answer",
+        )
+        return result
 
     async def _invoke_llm(
         self, payload: ChatbotMessage, state: ConversationState
@@ -445,6 +457,35 @@ class LLMOrchestrator:
             "assistant",
             str(reply.data),
             max_messages=self._max_history_messages,
+        )
+
+    def _log_agent_response(
+        self,
+        *,
+        chat_id: str,
+        event: str,
+        data: Any,
+        entrypoint: str,
+    ) -> None:
+        """Record agent outputs for downstream analysis."""
+        try:
+            payload_str = (
+                data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
+            )
+        except TypeError:
+            payload_str = str(data)
+
+        # logger.info(
+        #     "agent response emitted",
+        #     extra={
+        #         "chat_id": chat_id,
+        #         "entrypoint": entrypoint,
+        #         "reply_event": event,
+        #         "reply_data": payload_str,
+        #     },
+        # )
+        logger.info(
+            f"agent response emitted: chat_id={chat_id}, entrypoint: {entrypoint}, reply_event: {event}, reply_data: {payload_str}"
         )
 
     @staticmethod
